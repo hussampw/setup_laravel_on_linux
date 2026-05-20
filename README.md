@@ -49,6 +49,14 @@ Run as root (or with sudo):
 sudo bash ubuntu_laravel.sh
 ```
 
+Or run directly via curl (without cloning the repository):
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hussampw/setup_laravel_on_linux/main/ubuntu_laravel.sh)"
+```
+
+Tip: downloading first is safer because you can review the script before executing it as root.
+
 The script is interactive and will ask for:
 - PHP version
 - Web server

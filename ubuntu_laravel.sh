@@ -142,10 +142,6 @@ PHP_EXTENSIONS=(
     "php${PHP_VERSION}-intl"
     "php${PHP_VERSION}-redis"
     "php${PHP_VERSION}-imagick"
-    "php${PHP_VERSION}-tokenizer"
-    "php${PHP_VERSION}-fileinfo"
-    "php${PHP_VERSION}-ctype"
-    "php${PHP_VERSION}-openssl"
 )
 
 apt-get install -y -qq "${PHP_EXTENSIONS[@]}"
