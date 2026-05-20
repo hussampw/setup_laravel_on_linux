@@ -22,6 +22,9 @@ header()  { echo -e "\n${BOLD}${CYAN}══════════════�
 # ── Root check ────────────────────────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && error "Run this script as root: sudo bash $0"
 
+# Keep apt/dpkg non-interactive while preserving this script's own prompts.
+export DEBIAN_FRONTEND=noninteractive
+
 # =============================================================================
 #  INTERACTIVE CONFIGURATION
 # =============================================================================
@@ -258,9 +261,6 @@ PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT:-laravel}"
 # Build server_name list
 ALL_DOMAINS="$DOMAIN"
 WWW_DOMAIN="www.${DOMAIN}"
-if [[ "${LINK_WWW^^}" == "Y" ]] && $IS_REAL_DOMAIN; then
-    ALL_DOMAINS="$DOMAIN $WWW_DOMAIN"
-fi
 if [[ -n "$EXTRA_DOMAINS" ]]; then
     EXTRA_CLEAN=$(echo "$EXTRA_DOMAINS" | tr ',' ' ' | xargs)
     ALL_DOMAINS="$ALL_DOMAINS $EXTRA_CLEAN"
