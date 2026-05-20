@@ -109,21 +109,67 @@ SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null \
          || hostname -I | awk '{print $1}')
 
 # =============================================================================
+#  RESUME SUPPORT
+# =============================================================================
+STATE_FILE="/var/tmp/laravel_setup_step.state"
+START_STEP=1
+CURRENT_STEP=0
+
+if [[ -f "$STATE_FILE" ]]; then
+    PREV_STEP=$(cat "$STATE_FILE" 2>/dev/null || true)
+    if [[ "$PREV_STEP" =~ ^([1-9]|10|11)$ ]]; then
+        read -rp "Detected an incomplete previous run at step ${PREV_STEP}. Resume from this step? [Y/n]: " RESUME_FROM_STATE
+        RESUME_FROM_STATE=${RESUME_FROM_STATE:-Y}
+        if [[ "${RESUME_FROM_STATE^^}" == "Y" ]]; then
+            START_STEP="$PREV_STEP"
+        fi
+    fi
+fi
+
+read -rp "Start from step [1-11] (default: ${START_STEP}): " START_STEP_INPUT
+if [[ -n "$START_STEP_INPUT" ]]; then
+    if [[ "$START_STEP_INPUT" =~ ^([1-9]|10|11)$ ]]; then
+        START_STEP="$START_STEP_INPUT"
+    else
+        warn "Invalid step '${START_STEP_INPUT}', using step ${START_STEP}"
+    fi
+fi
+
+on_step_error() {
+    local rc=$?
+    trap - ERR
+    if [[ "$CURRENT_STEP" -ge 1 && "$CURRENT_STEP" -le 11 ]]; then
+        echo "$CURRENT_STEP" > "$STATE_FILE"
+        echo ""
+        warn "Step ${CURRENT_STEP} failed."
+        warn "Fix the issue, rerun the script, and resume from step ${CURRENT_STEP}."
+    fi
+    exit "$rc"
+}
+
+trap 'on_step_error' ERR
+
+# =============================================================================
 #  STEP 1 — System update
 # =============================================================================
-header "Step 1 — System Update"
-apt-get update -qq && apt-get upgrade -y -qq
-apt-get install -y -qq \
-    curl wget git unzip zip software-properties-common \
-    ca-certificates gnupg lsb-release apt-transport-https
-success "System updated"
+if (( START_STEP <= 1 )); then
+    CURRENT_STEP=1
+    header "Step 1 — System Update"
+    apt-get update -qq && apt-get upgrade -y -qq
+    apt-get install -y -qq \
+        curl wget git unzip zip software-properties-common \
+        ca-certificates gnupg lsb-release apt-transport-https
+    success "System updated"
+fi
 
 # =============================================================================
 #  STEP 2 — PHP + extensions
 # =============================================================================
-header "Step 2 — PHP $PHP_VERSION"
-add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
-apt-get update -qq
+if (( START_STEP <= 2 )); then
+    CURRENT_STEP=2
+    header "Step 2 — PHP $PHP_VERSION"
+    add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
+    apt-get update -qq
 
 PHP_EXTENSIONS=(
     "php${PHP_VERSION}"
@@ -144,41 +190,46 @@ PHP_EXTENSIONS=(
     "php${PHP_VERSION}-imagick"
 )
 
-apt-get install -y -qq "${PHP_EXTENSIONS[@]}"
-success "PHP $PHP_VERSION + extensions installed"
+    apt-get install -y -qq "${PHP_EXTENSIONS[@]}"
+    success "PHP $PHP_VERSION + extensions installed"
 
 # Tune php.ini for web
-PHP_INI="/etc/php/${PHP_VERSION}/fpm/php.ini"
-sed -i 's/^upload_max_filesize.*/upload_max_filesize = 100M/' "$PHP_INI"
-sed -i 's/^post_max_size.*/post_max_size = 100M/'             "$PHP_INI"
-sed -i 's/^memory_limit.*/memory_limit = 256M/'               "$PHP_INI"
-sed -i 's/^max_execution_time.*/max_execution_time = 120/'    "$PHP_INI"
-success "php.ini tuned (upload=100M, memory=256M, timeout=120s)"
+    PHP_INI="/etc/php/${PHP_VERSION}/fpm/php.ini"
+    sed -i 's/^upload_max_filesize.*/upload_max_filesize = 100M/' "$PHP_INI"
+    sed -i 's/^post_max_size.*/post_max_size = 100M/'             "$PHP_INI"
+    sed -i 's/^memory_limit.*/memory_limit = 256M/'               "$PHP_INI"
+    sed -i 's/^max_execution_time.*/max_execution_time = 120/'    "$PHP_INI"
+    success "php.ini tuned (upload=100M, memory=256M, timeout=120s)"
 
-systemctl enable "php${PHP_VERSION}-fpm" --quiet
-systemctl restart "php${PHP_VERSION}-fpm"
+    systemctl enable "php${PHP_VERSION}-fpm" --quiet
+    systemctl restart "php${PHP_VERSION}-fpm"
+fi
 
 # =============================================================================
 #  STEP 3 — Composer
 # =============================================================================
-header "Step 3 — Composer"
-EXPECTED_CHECKSUM="$(curl -s https://composer.github.io/installer.sig)"
-php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"
+if (( START_STEP <= 3 )); then
+    CURRENT_STEP=3
+    header "Step 3 — Composer"
+    EXPECTED_CHECKSUM="$(curl -s https://composer.github.io/installer.sig)"
+    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+    ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"
 
-if [[ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]]; then
+    if [[ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]]; then
+        rm composer-setup.php
+        error "Composer installer checksum mismatch — aborting."
+    fi
+
+    php composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer
     rm composer-setup.php
-    error "Composer installer checksum mismatch — aborting."
+    success "Composer $(composer --version --no-ansi | awk '{print $3}') installed"
 fi
-
-php composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer
-rm composer-setup.php
-success "Composer $(composer --version --no-ansi | awk '{print $3}') installed"
 
 # =============================================================================
 #  STEP 3.5 — phpMyAdmin (optional)
 # =============================================================================
-if [[ "${INSTALL_PHPMYADMIN^^}" == "Y" ]]; then
+if (( START_STEP <= 4 )) && [[ "${INSTALL_PHPMYADMIN^^}" == "Y" ]]; then
+    CURRENT_STEP=4
     header "Step 3.5 — phpMyAdmin"
 
     # Avoid interactive debconf prompts during automated setup.
@@ -196,9 +247,11 @@ fi
 # =============================================================================
 #  STEP 4 — Web server
 # =============================================================================
-header "Step 4 — $WEB_SERVER"
-apt-get install -y -qq "$WEB_SERVER"
-systemctl enable "$WEB_SERVER" --quiet
+if (( START_STEP <= 4 )); then
+    CURRENT_STEP=4
+    header "Step 4 — $WEB_SERVER"
+    apt-get install -y -qq "$WEB_SERVER"
+    systemctl enable "$WEB_SERVER" --quiet
 
 PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT:-laravel}"
 
@@ -359,11 +412,14 @@ APACHE
     success "Apache configured → /etc/apache2/sites-available/laravel.conf"
     success "Domains: ${ALL_DOMAINS}"
 fi
+fi
 
 # =============================================================================
 #  STEP 5 — Database
 # =============================================================================
+if (( START_STEP <= 5 )); then
 header "Step 5 — Database ($DB_ENGINE)"
+CURRENT_STEP=5
 if [[ "$DB_ENGINE" == "mysql" ]]; then
     apt-get install -y -qq mysql-server
     systemctl enable mysql --quiet
@@ -396,11 +452,13 @@ SQL
 else
     warn "Database skipped"
 fi
+fi
 
 # =============================================================================
 #  STEP 6 — Redis
 # =============================================================================
-if [[ "${INSTALL_REDIS^^}" == "Y" ]]; then
+if (( START_STEP <= 6 )) && [[ "${INSTALL_REDIS^^}" == "Y" ]]; then
+    CURRENT_STEP=6
     header "Step 6 — Redis"
     apt-get install -y -qq redis-server
     sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
@@ -412,7 +470,8 @@ fi
 # =============================================================================
 #  STEP 7 — Node.js
 # =============================================================================
-if [[ "$NODE_VERSION" != "skip" ]]; then
+if (( START_STEP <= 7 )) && [[ "$NODE_VERSION" != "skip" ]]; then
+    CURRENT_STEP=7
     header "Step 7 — Node.js $NODE_VERSION"
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | bash - > /dev/null 2>&1
     apt-get install -y -qq nodejs
@@ -422,10 +481,12 @@ fi
 # =============================================================================
 #  STEP 8 — Supervisor (queue workers)
 # =============================================================================
-header "Step 8 — Supervisor"
-apt-get install -y -qq supervisor
-systemctl enable supervisor --quiet
-systemctl start supervisor
+if (( START_STEP <= 8 )); then
+    CURRENT_STEP=8
+    header "Step 8 — Supervisor"
+    apt-get install -y -qq supervisor
+    systemctl enable supervisor --quiet
+    systemctl start supervisor
 
 cat > /etc/supervisor/conf.d/laravel-worker.conf <<SUPERVISOR
 [program:laravel-worker]
@@ -442,14 +503,16 @@ stdout_logfile=${PROJECT_PATH}/storage/logs/worker.log
 stopwaitsecs=3600
 SUPERVISOR
 
-supervisorctl reread > /dev/null 2>&1
-supervisorctl update > /dev/null 2>&1
-success "Supervisor configured (2 queue workers)"
+    supervisorctl reread > /dev/null 2>&1
+    supervisorctl update > /dev/null 2>&1
+    success "Supervisor configured (2 queue workers)"
+fi
 
 # =============================================================================
 #  STEP 9 — New Laravel Project (optional)
 # =============================================================================
-if [[ -n "$LARAVEL_PROJECT" ]]; then
+if (( START_STEP <= 9 )) && [[ -n "$LARAVEL_PROJECT" ]]; then
+    CURRENT_STEP=9
     header "Step 9 — Laravel Project: $LARAVEL_PROJECT"
     mkdir -p "$WEB_ROOT"
     cd "$WEB_ROOT"
@@ -500,7 +563,8 @@ fi
 # =============================================================================
 #  STEP 10 — SSL via Certbot
 # =============================================================================
-if [[ "${INSTALL_SSL^^}" == "Y" ]] && [[ -n "$CERTBOT_EMAIL" ]]; then
+if (( START_STEP <= 10 )) && [[ "${INSTALL_SSL^^}" == "Y" ]] && [[ -n "$CERTBOT_EMAIL" ]]; then
+    CURRENT_STEP=10
     header "Step 10 — SSL (Let's Encrypt)"
     apt-get install -y -qq certbot
 
@@ -542,15 +606,18 @@ fi
 # =============================================================================
 #  STEP 11 — Firewall (UFW)
 # =============================================================================
-header "Step 11 — Firewall (UFW)"
-apt-get install -y -qq ufw > /dev/null
-ufw --force reset > /dev/null
-ufw default deny incoming > /dev/null
-ufw default allow outgoing > /dev/null
-ufw allow ssh > /dev/null
-ufw allow 'Nginx Full' > /dev/null 2>&1 || ufw allow 'Apache Full' > /dev/null 2>&1 || true
-ufw --force enable > /dev/null
-success "UFW firewall enabled (SSH + HTTP/HTTPS allowed)"
+if (( START_STEP <= 11 )); then
+    CURRENT_STEP=11
+    header "Step 11 — Firewall (UFW)"
+    apt-get install -y -qq ufw > /dev/null
+    ufw --force reset > /dev/null
+    ufw default deny incoming > /dev/null
+    ufw default allow outgoing > /dev/null
+    ufw allow ssh > /dev/null
+    ufw allow 'Nginx Full' > /dev/null 2>&1 || ufw allow 'Apache Full' > /dev/null 2>&1 || true
+    ufw --force enable > /dev/null
+    success "UFW firewall enabled (SSH + HTTP/HTTPS allowed)"
+fi
 
 # =============================================================================
 #  DONE — Summary
@@ -624,4 +691,7 @@ if [[ -n "$LARAVEL_PROJECT" ]]; then
     echo -e "  php artisan storage:link"
     echo -e "  php artisan optimize"
 fi
+
+rm -f "$STATE_FILE"
+trap - ERR
 echo ""
