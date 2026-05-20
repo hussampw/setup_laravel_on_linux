@@ -658,11 +658,14 @@ if (( START_STEP <= 10 )) && [[ "${INSTALL_SSL^^}" == "Y" ]] && [[ -n "$CERTBOT_
         error "Primary domain is empty. Provide a valid domain before SSL setup."
     fi
 
+    DOMAIN=$(echo "$DOMAIN" | xargs)
+    WWW_DOMAIN="www.${DOMAIN}"
+
     # Build certbot domain args safely; never pass empty -d values.
     CERTBOT_ARGS=("-d" "$DOMAIN")
     CERTBOT_DOMAIN_LIST="$DOMAIN"
 
-    if [[ "${LINK_WWW^^}" == "Y" ]] && $IS_REAL_DOMAIN; then
+    if [[ "${LINK_WWW^^}" == "Y" ]] && $IS_REAL_DOMAIN && [[ -n "$WWW_DOMAIN" ]]; then
         CERTBOT_ARGS+=("-d" "$WWW_DOMAIN")
         CERTBOT_DOMAIN_LIST+=" $WWW_DOMAIN"
     fi
