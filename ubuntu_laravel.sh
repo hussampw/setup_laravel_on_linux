@@ -254,6 +254,15 @@ if (( START_STEP <= 4 )); then
     CURRENT_STEP=4
     header "Step 4 — $WEB_SERVER"
     apt-get install -y -qq "$WEB_SERVER"
+
+    if [[ "$WEB_SERVER" == "nginx" ]]; then
+        systemctl stop apache2 > /dev/null 2>&1 || true
+        systemctl disable apache2 > /dev/null 2>&1 || true
+    else
+        systemctl stop nginx > /dev/null 2>&1 || true
+        systemctl disable nginx > /dev/null 2>&1 || true
+    fi
+
     systemctl enable "$WEB_SERVER" --quiet
 
 PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT:-laravel}"
