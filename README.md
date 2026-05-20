@@ -66,6 +66,11 @@ The script is interactive and will ask for:
 - Whether to install phpMyAdmin
 - Whether to create a new Laravel project
 
+It also supports resuming partial runs:
+- On failure, it stores the failed step in /var/tmp/laravel_setup_step.state
+- On next run, it asks if you want to resume from that step
+- You can also manually choose any start step from 1 to 11
+
 ## Existing Project vs New Project
 
 If you already uploaded a Laravel project:
