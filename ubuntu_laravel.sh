@@ -654,18 +654,29 @@ if (( START_STEP <= 10 )) && [[ "${INSTALL_SSL^^}" == "Y" ]] && [[ -n "$CERTBOT_
     header "Step 10 — SSL (Let's Encrypt)"
     apt-get install -y -qq certbot
 
-    # Build -d flags for all domains
-    CERTBOT_DOMAINS="-d ${DOMAIN}"
-    if [[ "${LINK_WWW^^}" == "Y" ]] && $IS_REAL_DOMAIN; then
-        CERTBOT_DOMAINS="${CERTBOT_DOMAINS} -d ${WWW_DOMAIN}"
+    if [[ -z "$DOMAIN" ]]; then
+        error "Primary domain is empty. Provide a valid domain before SSL setup."
     fi
+
+    # Build certbot domain args safely; never pass empty -d values.
+    CERTBOT_ARGS=("-d" "$DOMAIN")
+    CERTBOT_DOMAIN_LIST="$DOMAIN"
+
+    if [[ "${LINK_WWW^^}" == "Y" ]] && $IS_REAL_DOMAIN; then
+        CERTBOT_ARGS+=("-d" "$WWW_DOMAIN")
+        CERTBOT_DOMAIN_LIST+=" $WWW_DOMAIN"
+    fi
+
     if [[ -n "$EXTRA_DOMAINS" ]]; then
-        for EXTRA in $(echo "$EXTRA_DOMAINS" | tr ',' ' '); do
-            CERTBOT_DOMAINS="${CERTBOT_DOMAINS} -d ${EXTRA// /}"
+        EXTRA_CLEAN=$(echo "$EXTRA_DOMAINS" | tr ',' ' ' | xargs)
+        for EXTRA in $EXTRA_CLEAN; do
+            [[ -z "$EXTRA" ]] && continue
+            CERTBOT_ARGS+=("-d" "$EXTRA")
+            CERTBOT_DOMAIN_LIST+=" $EXTRA"
         done
     fi
 
-    info "Requesting certificate for: ${CERTBOT_DOMAINS//-d /}"
+    info "Requesting certificate for: ${CERTBOT_DOMAIN_LIST}"
 
     # Check DNS resolves to this server before attempting cert
     SERVER_IP=$(curl -s https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
@@ -680,10 +691,10 @@ if (( START_STEP <= 10 )) && [[ "${INSTALL_SSL^^}" == "Y" ]] && [[ -n "$CERTBOT_
 
     if [[ "$WEB_SERVER" == "nginx" ]]; then
         apt-get install -y -qq python3-certbot-nginx
-        certbot --nginx $CERTBOT_DOMAINS --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect
+        certbot --nginx "${CERTBOT_ARGS[@]}" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect
     else
         apt-get install -y -qq python3-certbot-apache
-        certbot --apache $CERTBOT_DOMAINS --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect
+        certbot --apache "${CERTBOT_ARGS[@]}" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect
     fi
 
     success "SSL certificate installed (auto-renew via cron/systemd timer)"
