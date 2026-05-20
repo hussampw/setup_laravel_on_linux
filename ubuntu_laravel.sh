@@ -497,6 +497,7 @@ if (( START_STEP <= 8 )); then
     systemctl enable supervisor --quiet
     systemctl start supervisor
 
+if [[ -f "${PROJECT_PATH}/artisan" ]]; then
 cat > /etc/supervisor/conf.d/laravel-worker.conf <<SUPERVISOR
 [program:laravel-worker]
 process_name=%(program_name)s_%(process_num)02d
@@ -515,6 +516,13 @@ SUPERVISOR
     supervisorctl reread > /dev/null 2>&1
     supervisorctl update > /dev/null 2>&1
     success "Supervisor configured (2 queue workers)"
+else
+    rm -f /etc/supervisor/conf.d/laravel-worker.conf
+    supervisorctl reread > /dev/null 2>&1 || true
+    supervisorctl update > /dev/null 2>&1 || true
+    warn "Supervisor installed, but queue worker was skipped (artisan not found at ${PROJECT_PATH})"
+    warn "After project is ready, rerun from step 8 or add worker config manually"
+fi
 fi
 
 # =============================================================================
