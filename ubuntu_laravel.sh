@@ -25,82 +25,133 @@ header()  { echo -e "\n${BOLD}${CYAN}══════════════�
 # Keep apt/dpkg non-interactive while preserving this script's own prompts.
 export DEBIAN_FRONTEND=noninteractive
 
+# Persist run state and answers for resume/retry flows.
+STATE_FILE="/var/tmp/laravel_setup_step.state"
+CONFIG_FILE="/var/tmp/laravel_setup_config.env"
+START_STEP=1
+CURRENT_STEP=0
+USE_SAVED_CONFIG="N"
+
+save_config() {
+    umask 077
+    {
+        printf 'PHP_VERSION=%q\n' "${PHP_VERSION:-}"
+        printf 'WEB_SERVER=%q\n' "${WEB_SERVER:-}"
+        printf 'DB_ENGINE=%q\n' "${DB_ENGINE:-}"
+        printf 'DB_NAME=%q\n' "${DB_NAME:-}"
+        printf 'DB_USER=%q\n' "${DB_USER:-}"
+        printf 'DB_PASS=%q\n' "${DB_PASS:-}"
+        printf 'INSTALL_REDIS=%q\n' "${INSTALL_REDIS:-Y}"
+        printf 'INSTALL_PHPMYADMIN=%q\n' "${INSTALL_PHPMYADMIN:-N}"
+        printf 'NODE_VERSION=%q\n' "${NODE_VERSION:-skip}"
+        printf 'LARAVEL_PROJECT=%q\n' "${LARAVEL_PROJECT:-}"
+        printf 'WEB_ROOT=%q\n' "${WEB_ROOT:-/var/www}"
+        printf 'DOMAIN=%q\n' "${DOMAIN:-}"
+        printf 'IS_REAL_DOMAIN=%q\n' "${IS_REAL_DOMAIN:-false}"
+        printf 'LINK_WWW=%q\n' "${LINK_WWW:-N}"
+        printf 'EXTRA_DOMAINS=%q\n' "${EXTRA_DOMAINS:-}"
+        printf 'INSTALL_SSL=%q\n' "${INSTALL_SSL:-N}"
+        printf 'CERTBOT_EMAIL=%q\n' "${CERTBOT_EMAIL:-}"
+    } > "$CONFIG_FILE"
+}
+
+# Offer reuse of saved answers before asking interactive questions again.
+if [[ -f "$STATE_FILE" && -f "$CONFIG_FILE" ]]; then
+    PREV_STEP=$(cat "$STATE_FILE" 2>/dev/null || true)
+    if [[ "$PREV_STEP" =~ ^([1-9]|10|11)$ ]]; then
+        read -rp "Found previous setup answers + failed step ${PREV_STEP}. Reuse previous answers? [Y/n]: " REUSE_CONFIG
+        REUSE_CONFIG=${REUSE_CONFIG:-Y}
+        if [[ "${REUSE_CONFIG^^}" == "Y" ]]; then
+            # shellcheck disable=SC1090
+            source "$CONFIG_FILE"
+            USE_SAVED_CONFIG="Y"
+            success "Loaded previous answers from ${CONFIG_FILE}"
+        fi
+    fi
+fi
+
 # =============================================================================
 #  INTERACTIVE CONFIGURATION
 # =============================================================================
 header "Laravel Server Setup — Configuration"
 
-# PHP version
-echo -e "${BOLD}PHP version:${RESET}"
-select PHP_VERSION in "8.3" "8.2" "8.1"; do
-    [[ -n "$PHP_VERSION" ]] && break
-done
-success "PHP $PHP_VERSION selected"
+if [[ "$USE_SAVED_CONFIG" != "Y" ]]; then
+    # PHP version
+    echo -e "${BOLD}PHP version:${RESET}"
+    select PHP_VERSION in "8.3" "8.2" "8.1"; do
+        [[ -n "$PHP_VERSION" ]] && break
+    done
+    success "PHP $PHP_VERSION selected"
 
-# Web server
-echo -e "\n${BOLD}Web server:${RESET}"
-select WEB_SERVER in "nginx" "apache2"; do
-    [[ -n "$WEB_SERVER" ]] && break
-done
-success "$WEB_SERVER selected"
+    # Web server
+    echo -e "\n${BOLD}Web server:${RESET}"
+    select WEB_SERVER in "nginx" "apache2"; do
+        [[ -n "$WEB_SERVER" ]] && break
+    done
+    success "$WEB_SERVER selected"
 
-# Database
-echo -e "\n${BOLD}Database:${RESET}"
-select DB_ENGINE in "mysql" "postgresql" "none"; do
-    [[ -n "$DB_ENGINE" ]] && break
-done
+    # Database
+    echo -e "\n${BOLD}Database:${RESET}"
+    select DB_ENGINE in "mysql" "postgresql" "none"; do
+        [[ -n "$DB_ENGINE" ]] && break
+    done
 
-if [[ "$DB_ENGINE" != "none" ]]; then
-    read -rp "  DB name     : " DB_NAME
-    read -rp "  DB user     : " DB_USER
-    read -rsp "  DB password : " DB_PASS; echo
-    success "$DB_ENGINE selected (db=$DB_NAME, user=$DB_USER)"
-fi
-
-# Redis
-read -rp $'\n'"Install Redis? [Y/n]: " INSTALL_REDIS
-INSTALL_REDIS=${INSTALL_REDIS:-Y}
-
-# phpMyAdmin
-if [[ "$DB_ENGINE" == "mysql" ]]; then
-    read -rp "Install phpMyAdmin? [Y/n]: " INSTALL_PHPMYADMIN
-    INSTALL_PHPMYADMIN=${INSTALL_PHPMYADMIN:-Y}
-else
-    read -rp "Install phpMyAdmin (best with MySQL)? [y/N]: " INSTALL_PHPMYADMIN
-    INSTALL_PHPMYADMIN=${INSTALL_PHPMYADMIN:-N}
-fi
-
-# Node.js
-echo -e "\n${BOLD}Node.js version (for Vite/npm):${RESET}"
-select NODE_VERSION in "20" "18" "skip"; do
-    [[ -n "$NODE_VERSION" ]] && break
-done
-
-# Laravel project
-read -rp $'\n'"New Laravel project name (leave blank to skip): " LARAVEL_PROJECT
-read -rp "Web root base directory [/var/www]: " WEB_ROOT
-WEB_ROOT=${WEB_ROOT:-/var/www}
-
-# Domain (for Nginx/Apache vhost)
-read -rp "Primary domain (e.g. example.com or server IP): " DOMAIN
-
-# www redirect
-IS_REAL_DOMAIN=false
-if [[ "$DOMAIN" =~ \. ]] && [[ ! "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    IS_REAL_DOMAIN=true
-    read -rp "Also link www.${DOMAIN} → ${DOMAIN}? [Y/n]: " LINK_WWW
-    LINK_WWW=${LINK_WWW:-Y}
-    read -rp "Any extra subdomains to link? (comma-separated, leave blank for none): " EXTRA_DOMAINS
-fi
-
-# SSL
-if $IS_REAL_DOMAIN; then
-    read -rp "Install SSL via Certbot? [Y/n]: " INSTALL_SSL
-    INSTALL_SSL=${INSTALL_SSL:-Y}
-    if [[ "${INSTALL_SSL^^}" == "Y" ]]; then
-        read -rp "Email for Certbot: " CERTBOT_EMAIL
+    if [[ "$DB_ENGINE" != "none" ]]; then
+        read -rp "  DB name     : " DB_NAME
+        read -rp "  DB user     : " DB_USER
+        read -rsp "  DB password : " DB_PASS; echo
+        success "$DB_ENGINE selected (db=$DB_NAME, user=$DB_USER)"
     fi
+
+    # Redis
+    read -rp $'\n'"Install Redis? [Y/n]: " INSTALL_REDIS
+    INSTALL_REDIS=${INSTALL_REDIS:-Y}
+
+    # phpMyAdmin
+    if [[ "$DB_ENGINE" == "mysql" ]]; then
+        read -rp "Install phpMyAdmin? [Y/n]: " INSTALL_PHPMYADMIN
+        INSTALL_PHPMYADMIN=${INSTALL_PHPMYADMIN:-Y}
+    else
+        read -rp "Install phpMyAdmin (best with MySQL)? [y/N]: " INSTALL_PHPMYADMIN
+        INSTALL_PHPMYADMIN=${INSTALL_PHPMYADMIN:-N}
+    fi
+
+    # Node.js
+    echo -e "\n${BOLD}Node.js version (for Vite/npm):${RESET}"
+    select NODE_VERSION in "20" "18" "skip"; do
+        [[ -n "$NODE_VERSION" ]] && break
+    done
+
+    # Laravel project
+    read -rp $'\n'"New Laravel project name (leave blank to skip): " LARAVEL_PROJECT
+    read -rp "Web root base directory [/var/www]: " WEB_ROOT
+    WEB_ROOT=${WEB_ROOT:-/var/www}
+
+    # Domain (for Nginx/Apache vhost)
+    read -rp "Primary domain (e.g. example.com or server IP): " DOMAIN
+
+    # www redirect
+    IS_REAL_DOMAIN=false
+    if [[ "$DOMAIN" =~ \. ]] && [[ ! "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        IS_REAL_DOMAIN=true
+        read -rp "Also link www.${DOMAIN} → ${DOMAIN}? [Y/n]: " LINK_WWW
+        LINK_WWW=${LINK_WWW:-Y}
+        read -rp "Any extra subdomains to link? (comma-separated, leave blank for none): " EXTRA_DOMAINS
+    fi
+
+    # SSL
+    if $IS_REAL_DOMAIN; then
+        read -rp "Install SSL via Certbot? [Y/n]: " INSTALL_SSL
+        INSTALL_SSL=${INSTALL_SSL:-Y}
+        if [[ "${INSTALL_SSL^^}" == "Y" ]]; then
+            read -rp "Email for Certbot: " CERTBOT_EMAIL
+        fi
+    fi
+else
+    success "Reusing previous answers."
 fi
+
+save_config
 
 echo ""
 warn "Review your choices above. Starting in 5 seconds… (Ctrl+C to abort)"
@@ -114,10 +165,6 @@ SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null \
 # =============================================================================
 #  RESUME SUPPORT
 # =============================================================================
-STATE_FILE="/var/tmp/laravel_setup_step.state"
-START_STEP=1
-CURRENT_STEP=0
-
 if [[ -f "$STATE_FILE" ]]; then
     PREV_STEP=$(cat "$STATE_FILE" 2>/dev/null || true)
     if [[ "$PREV_STEP" =~ ^([1-9]|10|11)$ ]]; then
