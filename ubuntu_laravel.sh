@@ -45,6 +45,7 @@ save_config() {
         printf 'INSTALL_PHPMYADMIN=%q\n' "${INSTALL_PHPMYADMIN:-N}"
         printf 'NODE_VERSION=%q\n' "${NODE_VERSION:-skip}"
         printf 'LARAVEL_PROJECT=%q\n' "${LARAVEL_PROJECT:-}"
+        printf 'EXISTING_PROJECT_PATH=%q\n' "${EXISTING_PROJECT_PATH:-}"
         printf 'WEB_ROOT=%q\n' "${WEB_ROOT:-/var/www}"
         printf 'DOMAIN=%q\n' "${DOMAIN:-}"
         printf 'IS_REAL_DOMAIN=%q\n' "${IS_REAL_DOMAIN:-false}"
@@ -123,9 +124,16 @@ if [[ "$USE_SAVED_CONFIG" != "Y" ]]; then
     done
 
     # Laravel project
-    read -rp $'\n'"New Laravel project name (leave blank to skip): " LARAVEL_PROJECT
-    read -rp "Web root base directory [/var/www]: " WEB_ROOT
+    read -rp $'\n'"New Laravel project name (for create-project). Leave blank to use an existing project: " LARAVEL_PROJECT
+    read -rp "Base web directory for NEW projects only [/var/www]: " WEB_ROOT
     WEB_ROOT=${WEB_ROOT:-/var/www}
+
+    if [[ -z "$LARAVEL_PROJECT" ]]; then
+        read -rp "Existing Laravel project full path [${WEB_ROOT}/laravel]: " EXISTING_PROJECT_PATH
+        EXISTING_PROJECT_PATH=${EXISTING_PROJECT_PATH:-${WEB_ROOT}/laravel}
+    else
+        EXISTING_PROJECT_PATH=""
+    fi
 
     # Domain (for Nginx/Apache vhost)
     read -rp "Primary domain (e.g. example.com or server IP): " DOMAIN
@@ -152,7 +160,11 @@ else
 fi
 
 # Keep project path available even when resuming from steps after web-server setup.
-PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT:-laravel}"
+if [[ -n "$LARAVEL_PROJECT" ]]; then
+    PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT}"
+else
+    PROJECT_PATH="${EXISTING_PROJECT_PATH:-${WEB_ROOT}/laravel}"
+fi
 
 save_config
 
