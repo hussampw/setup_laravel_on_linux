@@ -151,6 +151,9 @@ else
     success "Reusing previous answers."
 fi
 
+# Keep project path available even when resuming from steps after web-server setup.
+PROJECT_PATH="${WEB_ROOT}/${LARAVEL_PROJECT:-laravel}"
+
 save_config
 
 echo ""
@@ -540,6 +543,13 @@ fi
 if (( START_STEP <= 8 )); then
     CURRENT_STEP=8
     header "Step 8 — Supervisor"
+
+    # Prevent supervisor start failures on resume when an old worker config
+    # points to a project path that does not exist yet.
+    if [[ ! -f "${PROJECT_PATH}/artisan" ]]; then
+        rm -f /etc/supervisor/conf.d/laravel-worker.conf
+    fi
+
     apt-get install -y -qq supervisor
     systemctl enable supervisor --quiet
     systemctl start supervisor
